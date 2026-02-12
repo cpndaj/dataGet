@@ -83,7 +83,7 @@ def obtener_tasas_bcra():
 
 # --- 3. NAVEGACIÓN ---
 st.sidebar.title("AWINQA Consultant")
-opcion = st.sidebar.radio("Ir a:", ["📊 Cotizaciones", "🏦 Tasas Plazo Fijo", "📈 Inflación INDEC", "🧮 Calculador PF"])
+opcion = st.sidebar.radio("Ir a:", ["📊 Cotizaciones", "🏦 Tasas Plazo Fijo", "📈 Inflación INDEC"])
 
 
 # --- LÓGICA DE PÁGINAS ---
