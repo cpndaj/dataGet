@@ -153,7 +153,8 @@ elif opcion == "📈 Inflación INDEC":
         c1, c2, c3 = st.columns(3)
         monto_input = c1.number_input("Monto a actualizar ($)", value=1000.0, step=100.0, key="monto_inf")
         meses_opciones = df_i['fecha'].dt.strftime('%m/%Y').tolist()[::-1]
-        f_origen_sel = c2.selectbox("Mes Origen", meses_opciones, index=len(meses_opciones)-1, key="sel_orig")
+        # f_origen_sel = c2.selectbox("Mes Origen", meses_opciones, index=len(meses_opciones)-100, key="sel_orig")
+        f_origen_sel = c2.selectbox("Mes Origen", meses_opciones, index=11, key="sel_orig")
         f_destino_sel = c3.selectbox("Mes Destino", meses_opciones, index=0, key="sel_dest")
 
         idx_origen = df_i[df_i['fecha'].dt.strftime('%m/%Y') == f_origen_sel]['indice'].values[0]
