@@ -83,11 +83,11 @@ def obtener_tasas_bcra():
 
 # --- 3. NAVEGACIÓN ---
 st.sidebar.title("AWINQA Consultant")
-opcion = st.sidebar.radio("Ir a:", ["📊 Cotizaciones", "🏦 Tasas Plazo Fijo", "📈 Inflación INDEC"])
+opcion = st.sidebar.radio("Ir a:", ["📊 Moneda", "🏦 Plazo Fijo", "📈 Inflación"])
 
 
 # --- LÓGICA DE PÁGINAS ---
-if opcion == "📊 Cotizaciones":
+if opcion == "📊 Moneda":
     st.title("💼 Dolar - Cotización (Banco Nación)")
     df = cargar_divisas()
     if not df.empty:
@@ -107,8 +107,8 @@ if opcion == "📊 Cotizaciones":
         fig.update_layout(xaxis=dict(showgrid=True, gridcolor='LightGray'), yaxis=dict(showgrid=True, gridcolor='LightGray'), hovermode="x unified")
         st.plotly_chart(fig, use_container_width=True)
 
-elif opcion == "📈 Inflación INDEC":
-    st.title("📈  Inflación (Indec)")
+elif opcion == "📈 Inflación":
+    st.title("📈  Inflación (INDEC)")
     df_i = obtener_inflacion()
     if not df_i.empty:
         df_i['año'] = df_i['fecha'].dt.year
@@ -166,8 +166,8 @@ elif opcion == "📈 Inflación INDEC":
         st.info(f"Variación entre periodos: **{fmt_ar(porcentaje_variacion)}%**")   
 
 
-elif opcion == "🏦 Tasas Plazo Fijo":
-    st.title("🏦 Plazo Fijo")
+elif opcion == "🏦 Plazo Fijo":
+    st.title("🏦 Tasas Plazo Fijo (BCRA)")
     st.subheader("Tasas vigentes por Banco")
     df_t = obtener_tasas_bcra()
     if not df_t.empty:
