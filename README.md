@@ -1,4 +1,4 @@
-# 📈 CPN Dante Jimenez - DataInfo
+# 📈 CPN Dante Jimenez - Consultor
 
 Esta plataforma interactiva centraliza indicadores económicos clave de Argentina para facilitar la toma de decisiones financieras y contables. Un proyecto diseñado por el **CPN Dante Jimenez** para aportar claridad y agilidad al análisis de datos.
 
