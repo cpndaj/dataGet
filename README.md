@@ -9,6 +9,10 @@ Además de herramientas digitales, ofrezco asesoramiento especializado en:
 * **Consultoría Financiera:** Análisis de inversiones y gestión de capital de trabajo.
 * **Auditoría de Procesos:** Optimización y control de gestión para empresas.
 * **Informes de Coyuntura:** Reportes personalizados sobre inflación y variables macroeconómicas.
+* **Control de Gestión:** Reportes para la toma de decisiones.
+* **Contabilidad de Costos:** Análisis de costos, presupuestos, centro de costos, análisis de inversiones.
+* **Desarrollo de Sistemas:** Análisis e implementación de software a medida.
+* **Automatización de Procesos:** Inteligencia artificial en apoyo a reducir costos y tiempos en administración.
 
 ## 🚀 Funcionalidades de la App
 
