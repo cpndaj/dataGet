@@ -19,12 +19,17 @@ def fmt_ar(valor):
 
 @st.cache_data(ttl=600)
 def cargar_divisas():
-    api_url = "https://api.argentinadatos.com/v1/cotizaciones/dolares/"
-    monedas = {'Dólar Billete': 'oficial', 'Dólar Blue': 'blue', 'Dólar Divisa': 'mayorista'}
+    # APIs para Dólares, Euro y Real
+    urls = {
+        'Dólar Oficial': "https://api.argentinadatos.com/v1/cotizaciones/dolares/oficial",
+        'Dólar Blue': "https://api.argentinadatos.com/v1/cotizaciones/dolares/blue",
+        'Euro': "https://api.argentinadatos.com/v1/cotizaciones/monedas/eur",
+        'Real': "https://api.argentinadatos.com/v1/cotizaciones/monedas/brl"
+    }
     dfs = []
-    for nombre, path in monedas.items():
+    for nombre, url in urls.items():
         try:
-            r = requests.get(api_url + path, timeout=8)
+            r = requests.get(url, timeout=8)
             if r.status_code == 200:
                 temp = pd.DataFrame(r.json())
                 temp = temp.rename(columns={'compra': f'{nombre} Compra', 'venta': f'{nombre} Venta'})
@@ -34,7 +39,8 @@ def cargar_divisas():
     
     if not dfs: return pd.DataFrame()
     df_f = dfs[0]
-    for i in range(1, len(dfs)): df_f = pd.merge(df_f, dfs[i], on='fecha', how='outer')
+    for i in range(1, len(dfs)): 
+        df_f = pd.merge(df_f, dfs[i], on='fecha', how='outer')
     return df_f.sort_values('fecha', ascending=False).reset_index(drop=True)
 
 @st.cache_data(ttl=86400)
@@ -52,30 +58,19 @@ def obtener_inflacion():
 
 @st.cache_data(ttl=3600)
 def obtener_tasas_bcra():
-    # Usamos la API de ArgentinaDatos que devuelve el formato que mencionas
     url = "https://api.argentinadatos.com/v1/finanzas/tasas/plazoFijo"
     try:
         res = requests.get(url, timeout=15)
         if res.status_code == 200:
             data = res.json()
             df = pd.DataFrame(data)
-            
-            # Adaptación al formato JSON que enviaste:
-            # entidad -> Banco
-            # tnaClientes -> Tasa (%)
             if 'entidad' in df.columns and 'tnaClientes' in df.columns:
-                # Nos quedamos con los datos más recientes si hay duplicados
                 if 'fecha' in df.columns:
                     df = df.sort_values('fecha', ascending=False)
                 df = df.drop_duplicates(subset=['entidad'])
-                
-                # Seleccionamos y renombramos
                 df = df[['entidad', 'tnaClientes']]
                 df.columns = ['Banco', 'Tasa (%)']
-                
-                # Convertimos 0.25 a 25.0 (porcentaje)
                 df['Tasa (%)'] = df['Tasa (%)'].astype(float) * 100
-                
                 return df.sort_values('Tasa (%)', ascending=False)
     except Exception as e:
         print(f"Error: {e}")
@@ -91,25 +86,49 @@ opcion = st.sidebar.radio(
 
 # --- LÓGICA DE PÁGINAS ---
 if opcion == "📊 Moneda":
-    st.title("💼 Dolar - Cotización (Banco Nación)")
+    st.title("💼 Cotizaciones - Divisas")
     st.divider()
     df = cargar_divisas()
     if not df.empty:
+        # A. VALORES EN TIEMPO REAL
         st.subheader(f"Cotizaciones del Día ({datetime.now().strftime('%d/%m/%Y')})")
-        row = df.iloc[0]
-        cols = st.columns(3)
-        data = [("Dólar BNA", "Dólar Billete"), ("Dólar Blue", "Dólar Blue"), ("Dólar Divisa", "Dólar Divisa")]
-        for i, (lab, k) in enumerate(data):
-            v, c = row.get(f'{k} Venta'), row.get(f'{k} Compra')
-            cols[i].metric(lab, f"${fmt_ar(v)}", f"Compra: ${fmt_ar(c)}", delta_color="off")
+        row_hoy = df.iloc[0]
+        cols = st.columns(4)
+        monedas_display = [("Dólar Oficial", "Dólar Oficial"), ("Dólar Blue", "Dólar Blue"), ("Euro", "Euro"), ("Real", "Real")]
+        
+        for i, (lab, k) in enumerate(monedas_display):
+            v, c = row_hoy.get(f'{k} Venta'), row_hoy.get(f'{k} Compra')
+            cols[i].metric(f"🟢 {lab}", f"${fmt_ar(v)}", f"Compra: ${fmt_ar(c)}", delta_color="off")
         
         st.divider()
-        st.subheader("Evolución últimos 30 días")
+        
+        # B. CIERRE DÍA ANTERIOR
+        if len(df) > 1:
+            row_ayer = df.iloc[1]
+            st.caption(f"Cierre Día Anterior: {row_ayer['fecha'].strftime('%d/%m/%Y')}")
+            cols_ayer = st.columns(4)
+            for i, (lab, k) in enumerate(monedas_display):
+                v, c = row_ayer.get(f'{k} Venta'), row_ayer.get(f'{k} Compra')
+                cols_ayer[i].metric(f"⚪ {lab}", f"${fmt_ar(v)}", f"Compra: ${fmt_ar(c)}", delta_color="off")
+        
+        st.divider()
+
+        # C. GRÁFICOS
+        st.subheader("Evolución últimos 30 días (Dólar)")
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df['fecha'].head(30), y=df['Dólar Billete Venta'].head(30), name="Oficial", mode='lines+markers'))
+        fig.add_trace(go.Scatter(x=df['fecha'].head(30), y=df['Dólar Oficial Venta'].head(30), name="Oficial", mode='lines+markers'))
         fig.add_trace(go.Scatter(x=df['fecha'].head(30), y=df['Dólar Blue Venta'].head(30), name="Blue", mode='lines+markers'))
         fig.update_layout(xaxis=dict(showgrid=True, gridcolor='LightGray'), yaxis=dict(showgrid=True, gridcolor='LightGray'), hovermode="x unified")
         st.plotly_chart(fig, use_container_width=True)
+
+        # D. TABLA AL FINAL
+        st.subheader("Histórico de Cotizaciones")
+        df_tabla = df.copy()
+        df_tabla['fecha'] = df_tabla['fecha'].dt.strftime('%d/%m/%Y')
+        for col in df_tabla.columns:
+            if col != 'fecha':
+                df_tabla[col] = df_tabla[col].apply(fmt_ar)
+        st.dataframe(df_tabla, use_container_width=True, hide_index=True)
 
 elif opcion == "📈 Inflación":
     st.title("📈  Inflación (INDEC)")
@@ -158,7 +177,6 @@ elif opcion == "📈 Inflación":
         c1, c2, c3 = st.columns(3)
         monto_input = c1.number_input("Monto a actualizar ($)", value=1000.0, step=100.0, key="monto_inf")
         meses_opciones = df_i['fecha'].dt.strftime('%m/%Y').tolist()[::-1]
-        # f_origen_sel = c2.selectbox("Mes Origen", meses_opciones, index=len(meses_opciones)-100, key="sel_orig")
         f_origen_sel = c2.selectbox("Mes Origen", meses_opciones, index=11, key="sel_orig")
         f_destino_sel = c3.selectbox("Mes Destino", meses_opciones, index=0, key="sel_dest")
 
@@ -169,7 +187,6 @@ elif opcion == "📈 Inflación":
         
         st.success(f"### Monto Actualizado: AR$ {fmt_ar(monto_final)}")
         st.info(f"Variación entre periodos: **{fmt_ar(porcentaje_variacion)}%**")   
-
 
 elif opcion == "🏦 Plazo Fijo":
     st.title("🏦 Tasas Plazo Fijo (BCRA)")
@@ -182,27 +199,13 @@ elif opcion == "🏦 Plazo Fijo":
         st.dataframe(df_t_show, use_container_width=True, hide_index=True)
 
         st.title("🧮 Calculador de Rendimiento")
-        df_t = obtener_tasas_bcra()
-        if not df_t.empty:
-            inv = st.number_input("Inversión ($)", value=100000.0)
-            banco = st.selectbox("Banco", df_t['Banco'])
-            tasa = df_t[df_t['Banco'] == banco]['Tasa (%)'].values[0]
-            gan = (inv * (tasa/100) * 30) / 365
-            st.metric(f"Ganancia en {banco}", f"AR$ {fmt_ar(gan)}", f"TNA: {fmt_ar(tasa)}%")
+        inv = st.number_input("Inversión ($)", value=100000.0)
+        banco = st.selectbox("Banco", df_t['Banco'])
+        tasa = df_t[df_t['Banco'] == banco]['Tasa (%)'].values[0]
+        gan = (inv * (tasa/100) * 30) / 365
+        st.metric(f"Ganancia en {banco}", f"AR$ {fmt_ar(gan)}", f"TNA: {fmt_ar(tasa)}%")
     else:
         st.warning("No se pudieron cargar las tasas. Intente nuevamente en unos instantes.")
-
-
-# elif opcion == "🧮 Calculador PF":
-    # st.title("🧮 Calculador de Rendimiento")
-    # df_t = obtener_tasas_bcra()
-    # if not df_t.empty:
-    #     inv = st.number_input("Inversión ($)", value=100000.0)
-    #     banco = st.selectbox("Banco", df_t['Banco'])
-    #     tasa = df_t[df_t['Banco'] == banco]['Tasa (%)'].values[0]
-    #     gan = (inv * (tasa/100) * 30) / 365
-    #     st.metric(f"Ganancia en {banco}", f"AR$ {fmt_ar(gan)}", f"TNA: {fmt_ar(tasa)}%")
-
 
 # --- LOGO ---
 st.sidebar.markdown("<br>" * 11, unsafe_allow_html=True)
