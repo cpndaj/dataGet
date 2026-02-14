@@ -82,13 +82,17 @@ def obtener_tasas_bcra():
     return pd.DataFrame()
 
 # --- 3. NAVEGACIÓN ---
-st.sidebar.title("AWINQA Consultant")
-opcion = st.sidebar.radio("Ir a:", ["📊 Moneda", "🏦 Plazo Fijo", "📈 Inflación"])
+st.sidebar.title(":green[DataInfo]", text_alignment="center") 
 
+opcion = st.sidebar.radio(
+    "Ir a:", 
+    ["📊 Moneda", "📈 Inflación", "🏦 Plazo Fijo",],
+)
 
 # --- LÓGICA DE PÁGINAS ---
 if opcion == "📊 Moneda":
     st.title("💼 Dolar - Cotización (Banco Nación)")
+    st.divider()
     df = cargar_divisas()
     if not df.empty:
         st.subheader(f"Cotizaciones del Día ({datetime.now().strftime('%d/%m/%Y')})")
@@ -109,6 +113,7 @@ if opcion == "📊 Moneda":
 
 elif opcion == "📈 Inflación":
     st.title("📈  Inflación (INDEC)")
+    st.divider()
     df_i = obtener_inflacion()
     if not df_i.empty:
         df_i['año'] = df_i['fecha'].dt.year
@@ -169,6 +174,7 @@ elif opcion == "📈 Inflación":
 elif opcion == "🏦 Plazo Fijo":
     st.title("🏦 Tasas Plazo Fijo (BCRA)")
     st.subheader("Tasas vigentes por Banco")
+    st.divider()
     df_t = obtener_tasas_bcra()
     if not df_t.empty:
         df_t_show = df_t.copy()
@@ -199,9 +205,16 @@ elif opcion == "🏦 Plazo Fijo":
 
 
 # --- LOGO ---
-st.sidebar.markdown("<br>" * 10, unsafe_allow_html=True)
+st.sidebar.markdown("<br>" * 11, unsafe_allow_html=True)
 try:
-    l_l, l_c, l_r = st.sidebar.columns([1.5, 1, 1.5])
+    l_l, l_c, l_r = st.sidebar.columns([1.5, .7, 1.5])
     l_c.image("daj_wb.png", use_container_width=True)
+    l_l1, l_c1, l_r1 = st.sidebar.columns([.5, 1.1, .5])
+    l_c1.image("awinqa_wb.png", use_container_width=True)
+
+    email_l, email_c, email_r = st.sidebar.columns([.4, 3, .4])
+    email_c.text("cpn@dantejimenez.com.ar")
+    mob_l, mob_c, mob_r = st.sidebar.columns([1, 2.5, 1])
+    mob_c.text("+54 9 381 546 3785")
 except:
     st.sidebar.caption("CPN Dante Jimenez DataInfo")
