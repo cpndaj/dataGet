@@ -5,219 +5,267 @@ import plotly.graph_objects as go
 from datetime import datetime
 
 # --- 1. CONFIGURACIÓN E IDENTIDAD ---
-st.set_page_config(page_title="CPN Dante Jimenez DataInfo", page_icon="📈", layout="wide")
+st.set_page_config(page_title="CPN Dante Jimenez - DataInfo", page_icon="📈", layout="wide")
 
-# Función para formatear números al estilo AR (1.234,56)
-def fmt_ar(valor):
-    if pd.isna(valor) or valor == "-": return "-"
-    try:
-        return f"{float(valor):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    except:
-        return str(valor)
-
-# --- 2. FUNCIONES DE DATOS ---
-
-@st.cache_data(ttl=600)
-def cargar_divisas():
-    # APIs para Dólares, Euro y Real
-    urls = {
-        'Dólar Oficial': "https://api.argentinadatos.com/v1/cotizaciones/dolares/oficial",
-        'Dólar Blue': "https://api.argentinadatos.com/v1/cotizaciones/dolares/blue",
-        'Euro': "https://api.argentinadatos.com/v1/cotizaciones/monedas/eur",
-        'Real': "https://api.argentinadatos.com/v1/cotizaciones/monedas/brl"
+st.markdown("""
+    <style>
+    .main { background-color: #f8fafc; }
+    .cuadro-unico {
+        background-color: #ffffff;
+        padding: 25px;
+        border-radius: 15px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        border: 1px solid #e2e8f0;
+        text-align: center;
+        margin-bottom: 20px;
     }
-    dfs = []
-    for nombre, url in urls.items():
-        try:
-            r = requests.get(url, timeout=8)
-            if r.status_code == 200:
-                temp = pd.DataFrame(r.json())
-                temp = temp.rename(columns={'compra': f'{nombre} Compra', 'venta': f'{nombre} Venta'})
-                temp['fecha'] = pd.to_datetime(temp['fecha'])
-                dfs.append(temp[['fecha', f'{nombre} Compra', f'{nombre} Venta']])
-        except: continue
-    
-    if not dfs: return pd.DataFrame()
-    df_f = dfs[0]
-    for i in range(1, len(dfs)): 
-        df_f = pd.merge(df_f, dfs[i], on='fecha', how='outer')
-    return df_f.sort_values('fecha', ascending=False).reset_index(drop=True)
+    .titulo-cuadro { font-size: 0.9rem; color: #64748b; text-transform: uppercase; font-weight: bold; margin-bottom: 10px; }
+    .seccion-venta { margin-bottom: 15px; }
+    .label-venta { font-size: 0.8rem; color: #2563eb; font-weight: bold; }
+    .val-venta { font-size: 2.2rem; font-weight: 800; color: #1e293b; line-height: 1; }
+    .seccion-compra { background-color: #f1f5f9; padding: 8px; border-radius: 8px; margin-bottom: 8px; }
+    .label-compra { font-size: 0.75rem; color: #475569; }
+    .val-compra { font-size: 1.2rem; font-weight: 600; color: #334155; }
+    .seccion-promedio { padding: 5px; }
+    .label-promedio { font-size: 0.75rem; color: #94a3b8; }
+    .val-promedio { font-size: 1.1rem; font-weight: 500; color: #64748b; font-style: italic; }
+    </style>
+    """, unsafe_allow_html=True)
 
-@st.cache_data(ttl=86400)
-def obtener_inflacion():
-    url = "https://api.argentinadatos.com/v1/finanzas/indices/inflacion"
+def fmt_ar(valor):
     try:
-        res = requests.get(url)
-        if res.status_code == 200:
-            df = pd.DataFrame(res.json())
+        num = float(valor)
+        return f"{num:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except: return "0,00"
+
+# --- 2. CARGA DE DATOS ---
+@st.cache_data(ttl=600)
+def cargar_datos_completos():
+    data = {
+        "divisas": pd.DataFrame(),
+        "inflacion": pd.DataFrame(),
+        "tasas": pd.DataFrame([{"Banco": "Promedio Sistema", "TNA": 35.0}])
+    }
+    try:
+        r = requests.get("https://api.argentinadatos.com/v1/cotizaciones/dolares", timeout=10)
+        if r.status_code == 200:
+            df = pd.DataFrame(r.json())
             df['fecha'] = pd.to_datetime(df['fecha'])
-            df = df.sort_values('fecha')
-            df['indice'] = (1 + df['valor']/100).cumprod()
-            return df
-    except: return pd.DataFrame()
+            df_v = df.pivot_table(index='fecha', columns='casa', values='venta', aggfunc='last')
+            df_c = df.pivot_table(index='fecha', columns='casa', values='compra', aggfunc='last')
+            df_v.columns = [f"{c.lower()}_venta" for c in df_v.columns]
+            df_c.columns = [f"{c.lower()}_compra" for c in df_c.columns]
+            data["divisas"] = pd.concat([df_v, df_c], axis=1).sort_index(ascending=False).reset_index()
+        
+        for m in ['eur', 'brl']:
+            re = requests.get(f"https://api.argentinadatos.com/v1/cotizaciones/monedas/{m}", timeout=10)
+            if re.status_code == 200:
+                data[f"moneda_{m}"] = pd.DataFrame(re.json()).sort_values('fecha', ascending=False).head(1)
 
-@st.cache_data(ttl=3600)
-def obtener_tasas_bcra():
-    url = "https://api.argentinadatos.com/v1/finanzas/tasas/plazoFijo"
-    try:
-        res = requests.get(url, timeout=15)
-        if res.status_code == 200:
-            data = res.json()
-            df = pd.DataFrame(data)
-            if 'entidad' in df.columns and 'tnaClientes' in df.columns:
-                if 'fecha' in df.columns:
-                    df = df.sort_values('fecha', ascending=False)
-                df = df.drop_duplicates(subset=['entidad'])
-                df = df[['entidad', 'tnaClientes']]
-                df.columns = ['Banco', 'Tasa (%)']
-                df['Tasa (%)'] = df['Tasa (%)'].astype(float) * 100
-                return df.sort_values('Tasa (%)', ascending=False)
-    except Exception as e:
-        print(f"Error: {e}")
-    return pd.DataFrame()
+        r_i = requests.get("https://api.argentinadatos.com/v1/finanzas/indices/inflacion", timeout=10)
+        if r_i.status_code == 200:
+            data["inflacion"] = pd.DataFrame(r_i.json())
+        
+        r_t = requests.get("https://api.argentinadatos.com/v1/finanzas/tasas/plazoFijo", timeout=10)
+        if r_t.status_code == 200:
+            df_t = pd.DataFrame(r_t.json())
+            if not df_t.empty:
+                df_t = df_t.sort_values('fecha').drop_duplicates('entidad', keep='last')
+                df_t = df_t[['entidad', 'tasa']].rename(columns={'entidad': 'Banco', 'tasa': 'TNA'})
+                data["tasas"] = df_t
+    except: pass
+    return data
+
+def safe_get(df, col):
+    if df is not None and not df.empty and col in df.columns:
+        val = df[col].dropna()
+        if not val.empty: return val.iloc[0]
+    return 0.0
+
+datos = cargar_datos_completos()
+df_d, df_i, df_t = datos["divisas"], datos["inflacion"], datos["tasas"]
 
 # --- 3. NAVEGACIÓN ---
-st.sidebar.title(":green[DataInfo]", text_alignment="center") 
+with st.sidebar:
+    st.title("💎 Estudio Jimenez")
+    menu = st.radio("Herramientas", 
+        ["🏠 Inicio", "📈 Mercado Cambiario", "💳 Dólar Tarjeta", "🔄 Interés Compuesto", "🧮 Comparador PF vs Inflación"])
 
-opcion = st.sidebar.radio(
-    "Ir a:", 
-    ["📊 Moneda", "📈 Inflación", "🏦 Plazo Fijo",],
-)
+# --- HOJA: INICIO ---
+if menu == "🏠 Inicio":
+    st.title("🚀 Indicadores Económicos")
 
-# --- LÓGICA DE PÁGINAS ---
-if opcion == "📊 Moneda":
-    st.title("💼 Cotizaciones - Divisas")
-    st.divider()
-    df = cargar_divisas()
-    if not df.empty:
-        # A. VALORES EN TIEMPO REAL
-        st.subheader(f"Cotizaciones del Día ({datetime.now().strftime('%d/%m/%Y')})")
-        row_hoy = df.iloc[0]
-        cols = st.columns(4)
-        monedas_display = [("Dólar Oficial", "Dólar Oficial"), ("Dólar Blue", "Dólar Blue"), ("Euro", "Euro"), ("Real", "Real")]
-        
-        for i, (lab, k) in enumerate(monedas_display):
-            v, c = row_hoy.get(f'{k} Venta'), row_hoy.get(f'{k} Compra')
-            cols[i].metric(f"🟢 {lab}", f"${fmt_ar(v)}", f"Compra: ${fmt_ar(c)}", delta_color="off")
-        
-        st.divider()
-        
-        # B. CIERRE DÍA ANTERIOR
-        if len(df) > 1:
-            row_ayer = df.iloc[1]
-            st.caption(f"Cierre Día Anterior: {row_ayer['fecha'].strftime('%d/%m/%Y')}")
-            cols_ayer = st.columns(4)
-            for i, (lab, k) in enumerate(monedas_display):
-                v, c = row_ayer.get(f'{k} Venta'), row_ayer.get(f'{k} Compra')
-                cols_ayer[i].metric(f"⚪ {lab}", f"${fmt_ar(v)}", f"Compra: ${fmt_ar(c)}", delta_color="off")
-        
-        st.divider()
+    def render_tarjeta_vertical(titulo, v, c):
+        p = (v + c) / 2 if (v + c) > 0 else 0.0
+        st.markdown(f"""
+            <div class="cuadro-unico">
+                <div class="titulo-cuadro">{titulo}</div>
+                <div class="seccion-venta">
+                    <div class="label-venta">VALOR DE VENTA</div>
+                    <div class="val-venta">${fmt_ar(v)}</div>
+                </div>
+                <div class="seccion-compra">
+                    <div class="label-compra">Valor de Compra</div>
+                    <div class="val-compra">${fmt_ar(c)}</div>
+                </div>
+                <div class="seccion-promedio">
+                    <div class="label-promedio">Promedio</div>
+                    <div class="val-promedio">${fmt_ar(p)}</div>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
 
-        # C. GRÁFICOS
-        st.subheader("Evolución últimos 30 días (Dólar)")
+    # Divisas
+    st.subheader("💵 Cotizaciones Dólar")
+    col1, col2, col3 = st.columns(3)
+    with col1: render_tarjeta_vertical("Dólar Oficial", safe_get(df_d, 'oficial_venta'), safe_get(df_d, 'oficial_compra'))
+    with col2: render_tarjeta_vertical("Dólar Blue", safe_get(df_d, 'blue_venta'), safe_get(df_d, 'blue_compra'))
+    with col3: render_tarjeta_vertical("Dólar MEP", safe_get(df_d, 'mep_venta'), safe_get(df_d, 'mep_compra'))
+
+    st.subheader("🌍 Otras Divisas")
+    col_e, col_r, col_x = st.columns(3)
+    with col_e:
+        df_eur = datos.get("moneda_eur", pd.DataFrame())
+        render_tarjeta_vertical("Euro", safe_get(df_eur, 'venta'), safe_get(df_eur, 'compra'))
+    with col_r:
+        df_brl = datos.get("moneda_brl", pd.DataFrame())
+        render_tarjeta_vertical("Real", safe_get(df_brl, 'venta'), safe_get(df_brl, 'compra'))
+
+    # Inflación Indicadores
+    st.markdown("---")
+    st.subheader("📈 Resumen de Inflación")
+    if not df_i.empty:
+        df_i['fecha'] = pd.to_datetime(df_i['fecha'])
+        df_i = df_i.sort_values('fecha')
+        ult = df_i.iloc[-1]
+        a_act = ult['fecha'].year
+        
+        def calc_acumulado(año, mes_tope=12):
+            mask = (df_i['fecha'].dt.year == año) & (df_i['fecha'].dt.month <= mes_tope)
+            if not df_i[mask].empty:
+                return ((df_i[mask]['valor']/100 + 1).prod() - 1) * 100
+            return 0.0
+
+        acum_2026 = calc_acumulado(2026, ult['fecha'].month)
+        acum_2025 = calc_acumulado(2025)
+        acum_2024 = calc_acumulado(2024)
+
+        c_inf1, c_inf2 = st.columns(2)
+        with c_inf1:
+            st.markdown(f'<div class="cuadro-unico"><div class="titulo-cuadro">Mensual</div><div class="val-venta">{fmt_ar(ult["valor"])}%</div><div class="label-compra">Mes Actual</div></div>', unsafe_allow_html=True)
+        with c_inf2:
+            st.markdown(f'<div class="cuadro-unico"><div class="titulo-cuadro">Acumulado {a_act}</div><div class="val-venta">{fmt_ar(acum_2026)}%</div><div class="label-compra">Al cierre del último mes</div></div>', unsafe_allow_html=True)
+        
+        c_inf3, c_inf4 = st.columns(2)
+        with c_inf3:
+            st.markdown(f'<div class="cuadro-unico"><div class="titulo-cuadro">Inflación Anual 2025</div><div class="val-venta">{fmt_ar(acum_2025)}%</div><div class="label-compra">Enero - Diciembre</div></div>', unsafe_allow_html=True)
+        with c_inf4:
+            st.markdown(f'<div class="cuadro-unico"><div class="titulo-cuadro">Inflación Anual 2024</div><div class="val-venta">{fmt_ar(acum_2024)}%</div><div class="label-compra">Enero - Diciembre</div></div>', unsafe_allow_html=True)
+
+    # --- SECCIÓN: GRÁFICOS ---
+    st.markdown("---")
+    st.subheader("📊 Gráficos de Análisis")
+
+    # 1. Brecha Cambiaria
+    if not df_d.empty and 'blue_venta' in df_d.columns and 'oficial_venta' in df_d.columns:
+        df_brecha = df_d.copy().sort_values('fecha')
+        df_brecha['brecha'] = ((df_brecha['blue_venta'] / df_brecha['oficial_venta']) - 1) * 100
+        fig_b = go.Figure(go.Scatter(x=df_brecha['fecha'], y=df_brecha['brecha'], fill='tozeroy', line_color='#ef4444', name="Brecha %"))
+        fig_b.update_layout(title="Evolución de la Brecha Cambiaria (%)", template="plotly_white", height=300)
+        fig_b.update_xaxes(showgrid=True, gridwidth=1, gridcolor='LightGray')
+        st.plotly_chart(fig_b, use_container_width=True)
+
+    # 2. Inflación últimos 12 meses (Ajustado con Formato Mes-Año y Marcado de todos los puntos)
+    if not df_i.empty:
+        df_12m = df_i.tail(12).copy()
+        
+        fig_12 = go.Figure(go.Scatter(
+            x=df_12m['fecha'], 
+            y=df_12m['valor'], 
+            mode='lines+markers+text', # Marcadores y líneas
+            text=[f"{fmt_ar(v)}%" for v in df_12m['valor']], # Etiquetas sobre los puntos
+            textposition="top center",
+            line=dict(color='#2563eb', width=4),
+            marker=dict(size=10, symbol='circle')
+        ))
+        
+        fig_12.update_layout(
+            title="Inflación Mensual: Últimos 12 Meses",
+            template="plotly_white",
+            height=400,
+            margin=dict(t=50, b=50)
+        )
+        
+        # Configuración del Eje X: Formato Mar-25 y marcas para cada mes
+        fig_12.update_xaxes(
+            dtick="M1", # Marca cada mes
+            tickformat="%b-%y", # Formato: Tres letras mes - Año 2 dígitos
+            ticklabelmode="period",
+            showgrid=True, 
+            gridwidth=1, 
+            gridcolor='LightGray',
+            tickangle=-45 # Inclinado para mejor lectura
+        )
+        fig_12.update_yaxes(showgrid=True, gridwidth=1, gridcolor='LightGray')
+        
+        st.plotly_chart(fig_12, use_container_width=True)
+
+    # 3. Comparativa de años (2026, 2025, 2024)
+    if not df_i.empty:
+        df_i['mes'] = df_i['fecha'].dt.month
+        df_i['año'] = df_i['fecha'].dt.year
+        fig_comp = go.Figure()
+        colores = {2026: '#2563eb', 2025: '#10b981', 2024: '#f59e0b'}
+        for año in [2026, 2025, 2024]:
+            df_year = df_i[df_i['año'] == año].sort_values('mes')
+            if not df_year.empty:
+                fig_comp.add_trace(go.Scatter(x=df_year['mes'], y=df_year['valor'], name=str(año), line=dict(color=colores.get(año), width=3), mode='lines+markers'))
+        
+        fig_comp.update_layout(
+            title="Comparativa Inflación por Año (Enero-Diciembre)",
+            xaxis=dict(tickmode='array', tickvals=list(range(1,13)), ticktext=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'], showgrid=True, gridwidth=1, gridcolor='LightGray'),
+            template="plotly_white", height=400, hovermode="x unified"
+        )
+        fig_comp.update_yaxes(showgrid=True, gridwidth=1, gridcolor='LightGray')
+        st.plotly_chart(fig_comp, use_container_width=True)
+
+# --- LAS OTRAS SECCIONES ---
+elif menu == "📈 Mercado Cambiario":
+    st.title("📊 Histórico")
+    if not df_d.empty:
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df['fecha'].head(30), y=df['Dólar Oficial Venta'].head(30), name="Oficial", mode='lines+markers'))
-        fig.add_trace(go.Scatter(x=df['fecha'].head(30), y=df['Dólar Blue Venta'].head(30), name="Blue", mode='lines+markers'))
-        fig.update_layout(xaxis=dict(showgrid=True, gridcolor='LightGray'), yaxis=dict(showgrid=True, gridcolor='LightGray'), hovermode="x unified")
+        for c in ['blue_venta', 'mep_venta', 'oficial_venta']:
+            if c in df_d.columns: fig.add_trace(go.Scatter(x=df_d['fecha'], y=df_d[c], name=c.replace('_venta','').upper()))
+        fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='LightGray')
+        fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='LightGray')
         st.plotly_chart(fig, use_container_width=True)
 
-        # D. TABLA AL FINAL
-        st.subheader("Histórico de Cotizaciones")
-        df_tabla = df.copy()
-        df_tabla['fecha'] = df_tabla['fecha'].dt.strftime('%d/%m/%Y')
-        for col in df_tabla.columns:
-            if col != 'fecha':
-                df_tabla[col] = df_tabla[col].apply(fmt_ar)
-        st.dataframe(df_tabla, use_container_width=True, hide_index=True)
+elif menu == "💳 Dólar Tarjeta":
+    st.title("💳 Calculador")
+    u = st.number_input("Monto USD", value=100.0)
+    of = safe_get(df_d, 'oficial_venta') if safe_get(df_d, 'oficial_venta') > 0 else 980.0
+    st.metric("Total Pesos", f"${fmt_ar(u * of * 1.6)}")
 
-elif opcion == "📈 Inflación":
-    st.title("📈  Inflación (INDEC)")
-    st.divider()
-    df_i = obtener_inflacion()
-    if not df_i.empty:
-        df_i['año'] = df_i['fecha'].dt.year
-        df_i['mes'] = df_i['fecha'].dt.month
-        meses_nom = {1:'Ene', 2:'Feb', 3:'Mar', 4:'Abr', 5:'May', 6:'Jun', 7:'Jul', 8:'Ago', 9:'Sep', 10:'Oct', 11:'Nov', 12:'Dic'}
-        
-        inf_12m = ((df_i.tail(12)['valor']/100 + 1).prod() - 1) * 100
-        inf_2024 = ((df_i[df_i['año'] == 2024]['valor']/100 + 1).prod() - 1) * 100
-        inf_2025 = ((df_i[df_i['año'] == 2025]['valor']/100 + 1).prod() - 1) * 100
-        anio_actual = datetime.now().year
-        inf_actual = ((df_i[df_i['año'] == anio_actual]['valor']/100 + 1).prod() - 1) * 100
+elif menu == "🔄 Interés Compuesto":
+    st.title("🔄 Interés Compuesto")
+    cap = st.number_input("Capital", value=1000000)
+    tna = st.number_input("TNA %", value=35.0)
+    t = st.slider("Meses", 1, 60, 12)
+    res = [float(cap)]
+    for i in range(1, t+1): res.append(res[-1] * (1 + (tna/100/12)))
+    st.metric("Final", f"${fmt_ar(res[-1])}")
+    fig = go.Figure(go.Scatter(y=res, mode='lines+markers'))
+    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='LightGray')
+    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='LightGray')
+    st.plotly_chart(fig, use_container_width=True)
 
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Últimos 12 Meses", f"{fmt_ar(inf_12m)}%")
-        m2.metric(f"Acumulado {anio_actual}", f"{fmt_ar(inf_actual)}%")
-        m3.metric("Anual 2025", f"{fmt_ar(inf_2025)}%")
-        m4.metric("Anual 2024", f"{fmt_ar(inf_2024)}%")
-
-        st.divider()
-        st.markdown("### Comparativa Interanual por Mes")
-        fig_line = go.Figure()
-        for anio in [2024, 2025, 2026]:
-            df_anio = df_i[df_i['año'] == anio]
-            if not df_anio.empty:
-                fig_line.add_trace(go.Scatter(
-                    x=[meses_nom[m] for m in df_anio['mes']], 
-                    y=df_anio['valor'], name=str(anio), mode='lines+markers+text',
-                    text=df_anio['valor'].apply(lambda x: f"{fmt_ar(x)}%"), textposition="top center"
-                ))
-        fig_line.update_layout(xaxis=dict(showgrid=True, gridcolor='LightGray'), yaxis=dict(showgrid=True, gridcolor='LightGray'), height=450)
-        st.plotly_chart(fig_line, use_container_width=True)
-
-        st.markdown("### Historial últimos 12 meses")
-        df_12 = df_i.tail(12).copy()
-        df_12['label'] = df_12['fecha'].dt.strftime('%m/%y')
-        fig_bar = go.Figure(go.Bar(x=df_12['label'], y=df_12['valor'], text=df_12['valor'].apply(lambda x: f"{fmt_ar(x)}%"), textposition='auto', marker_color='#1E88E5'))
-        fig_bar.update_layout(xaxis=dict(showgrid=True, gridcolor='LightGray'), yaxis=dict(showgrid=True, gridcolor='LightGray'))
-        st.plotly_chart(fig_bar, use_container_width=True)
-
-        st.divider()
-        st.subheader("🧮 Calculadora de Actualización por Inflación")
-        c1, c2, c3 = st.columns(3)
-        monto_input = c1.number_input("Monto a actualizar ($)", value=1000.0, step=100.0, key="monto_inf")
-        meses_opciones = df_i['fecha'].dt.strftime('%m/%Y').tolist()[::-1]
-        f_origen_sel = c2.selectbox("Mes Origen", meses_opciones, index=11, key="sel_orig")
-        f_destino_sel = c3.selectbox("Mes Destino", meses_opciones, index=0, key="sel_dest")
-
-        idx_origen = df_i[df_i['fecha'].dt.strftime('%m/%Y') == f_origen_sel]['indice'].values[0]
-        idx_destino = df_i[df_i['fecha'].dt.strftime('%m/%Y') == f_destino_sel]['indice'].values[0]
-        monto_final = monto_input * (idx_destino / idx_origen)
-        porcentaje_variacion = ((idx_destino / idx_origen) - 1) * 100
-        
-        st.success(f"### Monto Actualizado: AR$ {fmt_ar(monto_final)}")
-        st.info(f"Variación entre periodos: **{fmt_ar(porcentaje_variacion)}%**")   
-
-elif opcion == "🏦 Plazo Fijo":
-    st.title("🏦 Tasas Plazo Fijo (BCRA)")
-    st.subheader("Tasas vigentes por Banco")
-    st.divider()
-    df_t = obtener_tasas_bcra()
-    if not df_t.empty:
-        df_t_show = df_t.copy()
-        df_t_show['Tasa (%)'] = df_t_show['Tasa (%)'].apply(fmt_ar)
-        st.dataframe(df_t_show, use_container_width=True, hide_index=True)
-
-        st.title("🧮 Calculador de Rendimiento")
-        inv = st.number_input("Inversión ($)", value=100000.0)
-        banco = st.selectbox("Banco", df_t['Banco'])
-        tasa = df_t[df_t['Banco'] == banco]['Tasa (%)'].values[0]
-        gan = (inv * (tasa/100) * 30) / 365
-        st.metric(f"Ganancia en {banco}", f"AR$ {fmt_ar(gan)}", f"TNA: {fmt_ar(tasa)}%")
-    else:
-        st.warning("No se pudieron cargar las tasas. Intente nuevamente en unos instantes.")
-
-# --- LOGO ---
-st.sidebar.markdown("<br>" * 11, unsafe_allow_html=True)
-try:
-    l_l, l_c, l_r = st.sidebar.columns([1.5, .7, 1.5])
-    l_c.image("daj_wb.png", use_container_width=True)
-    l_l1, l_c1, l_r1 = st.sidebar.columns([.5, 1.1, .5])
-    l_c1.image("awinqa_wb.png", use_container_width=True)
-
-    email_l, email_c, email_r = st.sidebar.columns([.4, 3, .4])
-    email_c.text("cpn@dantejimenez.com.ar")
-    mob_l, mob_c, mob_r = st.sidebar.columns([1, 2.5, 1])
-    mob_c.text("+54 9 381 546 3785")
-except:
-    st.sidebar.caption("CPN Dante Jimenez DataInfo")
+elif menu == "🧮 Comparador PF vs Inflación":
+    st.title("🧮 Comparador")
+    m = st.number_input("Monto", value=100000)
+    b = st.selectbox("Banco", df_t['Banco'].tolist() if not df_t.empty else ["Promedio"])
+    tna_p = df_t[df_t['Banco'] == b]['TNA'].values[0] if not df_t.empty else 35.0
+    inf_e = st.number_input("Inflación mensual %", value=4.0)
+    pf = m * (1 + (tna_p/100*30/365))
+    inf_v = m * (1 + inf_e/100)
+    st.metric("Resultado PF", f"${fmt_ar(pf)}", f"Dif: {fmt_ar(pf-inf_v)}")
+    st.plotly_chart(go.Figure(go.Bar(x=['PF', 'Infla'], y=[pf, inf_v])), use_container_width=True)
